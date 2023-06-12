@@ -97,10 +97,10 @@ void server_process_fds(struct server *server, int do_stdin) {
     if (ready > 0) {
         if (do_stdin) {
             server_console(server, &readfds);
-            server_client_recv(server, &readfds);
-            server_remove_dead_clients(server);
-            server_accept(server, &readfds);
         }
+        server_client_recv(server, &readfds);
+        server_remove_dead_clients(server);
+        server_accept(server, &readfds);
     } else if (ready < 0) {
         perror("server_process_fds select");
     }
