@@ -14,6 +14,9 @@ struct client {
     int fd;
     int status;
     struct sockaddr_in sockaddr;
+    char *buf;
+    unsigned buf_size;
+    unsigned buf_fill;
 };
 
 struct server {
@@ -142,24 +145,43 @@ void server_console(struct server *server, fd_set *readfds) {
     }
 }
 
-void server_process_client(struct server *server, struct client *client, char *buf, long buflen) {
-    printf("server received %ld bytes\n", buflen);
+void server_process_client(struct server *server, struct client *client, char *data, long datalen) {
+    printf("server received %ld bytes\n", datalen);
+    for (unsigned i = 0; i < datalen; i++) {
+        if (data[i] == '\n') {
+            int oldcount = data - client->buf;
+            int cmdlen = oldcount + i;
+            char *cmd = strndup(client->buf, cmdlen);
+            // Process client command here.
+            printf("Full command received (%s)\n", cmd);
+            free(cmd);
+            // Shift any remaining data to the beginning of the buffer and start over
+            int remain = client->buf_fill - (cmdlen + 1);
+            memmove(client->buf, data + i + 1, remain);
+            client->buf_fill = remain;
+            data = client->buf;
+            datalen = client->buf_fill;
+            i = 0;
+        }
+    }
 }
 
 void server_client_recv(struct server *server, fd_set *readfds) {
     int i;
-    struct client *tmpclient;
     struct list *clients = server->clients;
     while (clients) {
-        struct client *tmpclient = clients->car;
-        if (FD_ISSET(tmpclient->fd, readfds)) {
-            server->num_msg = recv(tmpclient->fd, server->msg, sizeof(server->msg), 0);
-            if (server->num_msg > 0) {
-                server_process_client(server, tmpclient, server->msg, server->num_msg);
-                memset(server->msg, 0, sizeof(server->msg));
-            } else if (server->num_msg == 0) {
-                printf("  got %zu bytes, setting %d as dead\n", server->num_msg, i);
-                tmpclient->status = 0;
+        struct client *c = clients->car;
+        if (FD_ISSET(c->fd, readfds)) {
+            char *dst = c->buf + c->buf_fill;
+            // TODO: expand the buffer if we fill it without receiving a newline
+            size_t recvd = recv(c->fd, dst, c->buf_size - c->buf_fill, 0);
+            if (recvd > 0) {
+                char *newdata = c->buf + c->buf_fill;
+                c->buf_fill += recvd;
+                server_process_client(server, c, newdata, recvd);
+            } else if (recvd == 0) {
+                printf("  got %zu bytes, setting %d as dead\n", recvd, i);
+                c->status = 0;
             } else if (errno) {
                 perror("recv");
                 FD_ZERO(readfds);
@@ -195,6 +217,8 @@ int server_remove_dead_clients(struct server *server) {
 
 struct client *make_client() {
     struct client *c = calloc(1, sizeof(struct client));
+    c->buf_size = BUFSIZ;
+    c->buf = calloc(1, c->buf_size);
     return c;
 }
 
