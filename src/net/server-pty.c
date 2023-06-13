@@ -1,3 +1,13 @@
+//
+// Server program that accepts a connection and runs a process in a
+// pseudo terminal, transferring input and output between the socket
+// and the pty.
+//
+// The objective was to be able to run a curses program over a telnet
+// connection. See the notes file "curses-over-telnet".
+//
+// Work in progress
+//
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>

@@ -1,3 +1,7 @@
+// Simple server.
+// Stores its clients in an array, uses select to see what's ready.
+// There's only one buffer, stored in the server struct.
+// Control-D in the server console exits.
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
@@ -153,7 +157,6 @@ void server_client_recv(struct server *server, fd_set *readfds) {
             server->num_msg = recv(tmpclient->fd, server->msg, sizeof(server->msg), 0);
             if (server->num_msg > 0) {
                 server_process_client(server, tmpclient, server->msg, server->num_msg);
-                // server_handle_client_msg(server, tmpclient, server->msg, server->num_msg);
                 memset(server->msg, 0, sizeof(server->msg));
             } else if (server->num_msg == 0) {
                 printf("  got %zu bytes, setting %d as dead\n", server->num_msg, i);
@@ -219,6 +222,7 @@ int accept_connection(int servsock, struct client *c) {
     }
     return fd;
 }
+
 // recvs a specific number of bytes and keeps trying until we get them all
 ssize_t recv_all(int fd, void *buf, size_t num_bytes, int flags) {
     char *dst = buf;

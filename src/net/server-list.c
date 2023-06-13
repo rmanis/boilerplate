@@ -1,3 +1,5 @@
+// Server program that stores its clients in a list, each with its
+// own input buffer
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
