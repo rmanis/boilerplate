@@ -1,18 +1,23 @@
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-// just so we can do `make server-list` without a makefile
-#include "list.c"
+#include <util.h>
+#include "util/list.h"
 
 #define MAX_CLIENTS 128
 
 struct client {
     int fd;
     int status;
+    pid_t pid;
+    int master;
+    int slave;
     struct sockaddr_in sockaddr;
     char *buf;
     unsigned buf_size;
@@ -124,9 +129,26 @@ int setup_select(fd_set *fdset, int servsock, struct list *clients) {
         if (fd > maxfd) {
             maxfd = fd;
         }
+        fd = c->master;
+        if (fd > maxfd) {
+            maxfd = fd;
+        }
+        FD_SET(fd, fdset);
         clients = clients->next;
     }
     return maxfd;
+}
+
+void kill_children(struct server *server) {
+    struct list *clients = server->clients;
+    while (clients) {
+        struct client *c = clients->car;
+        if (c->pid) {
+            kill(c->pid, SIGKILL);
+        }
+        close(c->master);
+        clients = clients->next;
+    }
 }
 
 void server_console(struct server *server, fd_set *readfds) {
@@ -136,6 +158,7 @@ void server_console(struct server *server, fd_set *readfds) {
         if (bytes_read == 0) {
             // Control-D pressed
             server->running = 0;
+            kill_children(server);
         } else if (bytes_read < 0 && errno) {
             perror("server_console read");
             FD_ZERO(readfds);
@@ -173,17 +196,30 @@ void server_client_recv(struct server *server, fd_set *readfds) {
         struct client *c = clients->car;
         if (FD_ISSET(c->fd, readfds)) {
             char *dst = c->buf + c->buf_fill;
-            // TODO: expand the buffer if we fill it without receiving a newline
             size_t recvd = recv(c->fd, dst, c->buf_size - c->buf_fill, 0);
             if (recvd > 0) {
-                char *newdata = c->buf + c->buf_fill;
-                c->buf_fill += recvd;
-                server_process_client(server, c, newdata, recvd);
+                printf("%d received %lu (", i, recvd);
+                fwrite(dst, recvd, 1, stdout);
+                printf(")\n");
+                size_t written = write(c->master, dst, recvd);
             } else if (recvd == 0) {
                 printf("  got %zu bytes, setting %d as dead\n", recvd, i);
                 c->status = 0;
             } else if (errno) {
                 perror("recv");
+                FD_ZERO(readfds);
+            }
+        }
+        if (c->status && FD_ISSET(c->master, readfds)) {
+            size_t nread = read(c->master, c->buf, c->buf_size);
+            if (nread > 0) {
+                // printf("%d read (%.*s)\n", i, (int) nread, c->buf);
+                size_t sent = send(c->fd, c->buf, nread, 0);
+            } else if (nread == 0) {
+                printf("  read %zu bytes, setting %d as dead\n", nread, i);
+                c->status = 0;
+            } else if (errno) {
+                perror("read");
                 FD_ZERO(readfds);
             }
         }
@@ -201,8 +237,12 @@ int server_remove_dead_clients(struct server *server) {
         tmpclient = cell->car;
         if (!tmpclient->status) {
             // Handle close connection here.
+            if (tmpclient->pid) {
+                kill(tmpclient->pid, SIGKILL);
+            }
             printf("remove client %d\n", i);
             close(tmpclient->fd);
+            close(tmpclient->master);
             *holder = cell->next;
             free(tmpclient);
             free(cell);
@@ -226,20 +266,44 @@ void add_client_to_list(struct list **list, struct client *client) {
     *list = cons(client, *list);
 }
 
+void fork_client(struct client *client) {
+    int stat = openpty(&client->master, &client->slave, NULL, NULL, NULL);
+    client->pid = fork();
+    if (client->pid == 0) {
+        // child
+        dup2(client->slave, STDIN_FILENO);
+        dup2(client->slave, STDOUT_FILENO);
+        dup2(client->slave, STDERR_FILENO);
+
+        struct termios attrs = {0};
+        tcgetattr(STDIN_FILENO, &attrs);
+        attrs.c_lflag &= ~ECHO;
+        tcsetattr(STDIN_FILENO, 0, &attrs);
+
+        close(client->master);
+        // execlp("./ech", "ech", 0);
+        execlp("top", "top", 0);
+    } else {
+        close(client->slave);
+        printf("child created %d\n", client->pid);
+    }
+}
+
 void server_accept(struct server *server, fd_set *readfds) {
-    struct client *tmpclient;
+    struct client *client;
     int clientsock;
     if (FD_ISSET(server->fd, readfds)) {
-        tmpclient = make_client();
-        clientsock = accept_connection(server->fd, tmpclient);
+        client = make_client();
+        clientsock = accept_connection(server->fd, client);
         if (clientsock < 0) {
-            free(tmpclient);
+            free(client);
             perror("accept_connection");
             FD_ZERO(readfds);
         } else {
             printf("accepted\n");
-            tmpclient->fd = clientsock;
-            add_client_to_list(&server->clients, tmpclient);
+            client->fd = clientsock;
+            add_client_to_list(&server->clients, client);
+            fork_client(client);
             // server_greet(server, clientsock);
         }
     }
