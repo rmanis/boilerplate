@@ -1,0 +1,32 @@
+From https://stackoverflow.com/questions/13334827/implementing-ncurses-over-telnet-ssh
+
+Question:
+I am currently attempting to implement a small telnet server which spawns a PTY on a connection from a client, and transmits the output of a small nCurses application to the client. I am working in ruby but the question is language-agnostic. My use case does not require users of the application to log into user accounts, so I would prefer not to delegate proper transmission of the screen to system tools such as telnetd.
+
+Given a TCP connection, what are the requirements for transmitting a textual nCurses interface over telnet or ssh? What types of buffering or encoding are necessary for ensuring that screen refreshes on the client side appropriately render the application? This is obviously handled during a typical ssh session, however how is it done?
+
+Thanks in advance.
+
+
+Answer:
+You need to set the TERM, LINES and COLUMNS environment variables (which you get the correct values for by the NVT protocol). Then you are ready to go and simply spawn an ncurses applications (with your PTY as it's stdin/stdout obviously). You do not need to buffer or otherwise tamper with the character streams (other than in your NVT implementation).
+
+-----
+OPENPTY(3)               BSD Library Functions Manual               OPENPTY(3)
+
+NAME
+     openpty, login_tty, forkpty -- tty utility functions
+
+SYNOPSIS
+     #include <util.h>
+
+     int
+     openpty(int *amaster, int *aslave, char *name, struct termios *termp,
+         struct winsize *winp);
+
+     int
+     login_tty(int fd);
+
+     pid_t
+     forkpty(int *amaster, char *name, struct termios *termp,
+         struct winsize *winp);
