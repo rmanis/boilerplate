@@ -276,7 +276,7 @@ void add_client_to_list(struct list **list, struct client *client) {
     *list = cons(client, *list);
 }
 
-void fork_client(struct client *client) {
+void fork_client(struct server *server, struct client *client) {
     int stat = openpty(&client->master, &client->slave, NULL, NULL, NULL);
     client->pid = fork();
     if (client->pid == 0) {
@@ -291,6 +291,7 @@ void fork_client(struct client *client) {
         tcsetattr(STDIN_FILENO, 0, &attrs);
 
         close(client->master);
+        close(server->fd);
         // execlp("./ech", "ech", 0);
         execlp("top", "top", 0);
     } else {
@@ -313,7 +314,7 @@ void server_accept(struct server *server, fd_set *readfds) {
             printf("accepted\n");
             client->fd = clientsock;
             add_client_to_list(&server->clients, client);
-            fork_client(client);
+            fork_client(server, client);
             // server_greet(server, clientsock);
         }
     }
